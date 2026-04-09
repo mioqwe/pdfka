@@ -65,14 +65,6 @@ def create_parser() -> argparse.ArgumentParser:
         help="Output directory for templates",
     )
 
-    # Build-css command
-    build_parser = subparsers.add_parser(
-        "build-css", help="Compile Tailwind CSS for PDF generation"
-    )
-    build_parser.add_argument(
-        "--watch", action="store_true", help="Watch for changes and rebuild"
-    )
-
     # Serve command
     serve_parser = subparsers.add_parser(
         "serve", help="Start development server with live reload"
@@ -133,7 +125,7 @@ def cmd_generate(args) -> None:
         country_code=args.country_code,
     )
 
-    generator = PDFGenerator(template_path=args.template)
+    generator = PDFGenerator(template_path=getattr(args, "template", None))
 
     if args.max_chars or args.max_words:
         from pdfka.config import OverflowConfig
@@ -172,7 +164,7 @@ def cmd_preview(args) -> None:
 
     content = args.content or default_content
 
-    generator = PDFGenerator(template_path=args.template)
+    generator = PDFGenerator(template_path=getattr(args, "template", None))
 
     output_path = args.output or os.path.join(_get_project_root(), "preview.html")
 
@@ -188,234 +180,6 @@ def cmd_preview(args) -> None:
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
-
-
-def _find_tailwind_exe(project_root: str):
-    """Find the tailwindcss executable path."""
-    # Check local node_modules .bin
-    local_bin = os.path.join(project_root, "node_modules", ".bin", "tailwindcss")
-    if os.path.exists(local_bin):
-        return local_bin
-
-    # Check Windows .bin
-    win_bin = os.path.join(project_root, "node_modules", ".bin", "tailwindcss.cmd")
-    if os.path.exists(win_bin):
-        return win_bin
-
-    return None
-
-
-def cmd_build_css(args) -> None:
-    """Compile Tailwind CSS."""
-    project_root = _get_project_root()
-
-    # Check if tailwind.config.js exists
-    config_path = os.path.join(project_root, "tailwind.config.js")
-    if not os.path.exists(config_path):
-        print("Error: tailwind.config.js not found.", file=sys.stderr)
-        print("Run 'pdfka init' first.", file=sys.stderr)
-        sys.exit(1)
-
-    input_css = os.path.join(project_root, "templates", "input.css")
-    output_css = os.path.join(project_root, "templates", "tailwind.css")
-
-    # Find tailwind executable
-    tailwind_exe = _find_tailwind_exe(project_root)
-
-    if tailwind_exe:
-        cmd = [tailwind_exe, "-i", input_css, "-o", output_css]
-    else:
-        # Try using npx with node
-        cmd = [
-            "node",
-            "./node_modules/tailwindcss/lib/cli.js",
-            "-i",
-            input_css,
-            "-o",
-            output_css,
-        ]
-
-    if args.watch:
-        cmd.append("--watch")
-    else:
-        cmd.append("--minify")
-
-    print(f"Building Tailwind CSS...")
-    print(f"  Input:  {input_css}")
-    print(f"  Output: {output_css}")
-
-    try:
-        result = subprocess.run(
-            cmd, cwd=project_root, check=True, capture_output=True, text=True
-        )
-        if result.stdout:
-            print(result.stdout)
-        print(f"✓ CSS compiled successfully!")
-    except subprocess.CalledProcessError as e:
-        print(f"Error: Failed to compile CSS", file=sys.stderr)
-        if e.stderr:
-            print(e.stderr, file=sys.stderr)
-        print(f"\nTry reinstalling:", file=sys.stderr)
-        print(f"  rm -rf node_modules package-lock.json", file=sys.stderr)
-        print(f"  npm install -D tailwindcss", file=sys.stderr)
-        sys.exit(1)
-    except FileNotFoundError as e:
-        print(f"Error: Command not found - {e}", file=sys.stderr)
-        print(f"\nMake sure you have Node.js installed:", file=sys.stderr)
-        print(f"  node --version", file=sys.stderr)
-        print(f"\nThen install Tailwind:", file=sys.stderr)
-        print(f"  npm install -D tailwindcss", file=sys.stderr)
-        sys.exit(1)
-
-
-TAILWIND_CONFIG = """/** @type {import('tailwindcss').Config} */
-module.exports = {
-  content: [
-    "./templates/**/*.html",
-  ],
-  theme: {
-    extend: {
-      fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
-      },
-      fontSize: {
-        'print-xs': ['12px', { lineHeight: '1.4' }],
-        'print-sm': ['14px', { lineHeight: '1.5' }],
-        'print-base': ['16px', { lineHeight: '1.6' }],
-        'print-lg': ['20px', { lineHeight: '1.4' }],
-        'print-xl': ['24px', { lineHeight: '1.3' }],
-        'print-2xl': ['32px', { lineHeight: '1.2' }],
-      },
-      colors: {
-        brand: {
-          50: '#ebf8ff',
-          100: '#bee3f8',
-          500: '#3182ce',
-          600: '#2b6cb0',
-          700: '#2c5282',
-          900: '#1a365d',
-        },
-      },
-    },
-  },
-  plugins: [],
-}
-"""
-
-INPUT_CSS = """@tailwind base;
-@tailwind components;
-@tailwind utilities;
-
-/* Inter Font for PDF */
-@layer base {
-  @font-face {
-    font-family: 'Inter';
-    src: url('../fonts/Inter/web/Inter-Regular.woff2') format('woff2');
-    font-weight: 400;
-    font-style: normal;
-  }
-  @font-face {
-    font-family: 'Inter';
-    src: url('../fonts/Inter/web/Inter-Medium.woff2') format('woff2');
-    font-weight: 500;
-    font-style: normal;
-  }
-  @font-face {
-    font-family: 'Inter';
-    src: url('../fonts/Inter/web/Inter-SemiBold.woff2') format('woff2');
-    font-weight: 600;
-    font-style: normal;
-  }
-  @font-face {
-    font-family: 'Inter';
-    src: url('../fonts/Inter/web/Inter-Bold.woff2') format('woff2');
-    font-weight: 700;
-    font-style: normal;
-  }
-}
-
-@layer base {
-  @page {
-    size: 297mm 210mm;
-    margin: 0;
-  }
-
-  * { box-sizing: border-box; }
-
-  body { margin: 0; padding: 0; font-family: 'Inter', system-ui, sans-serif; }
-}
-
-@layer components {
-  .pdf-page {
-    @apply w-[297mm] h-[210mm] p-[20mm] relative overflow-hidden bg-white;
-    page-break-after: always;
-  }
-
-  .pdf-page:last-child {
-    page-break-after: avoid;
-  }
-}
-
-@layer utilities {
-  .page-break { page-break-after: always; }
-  .page-break-avoid { page-break-after: avoid; }
-}
-"""
-
-
-def cmd_init(args) -> None:
-    """Create template files for customization."""
-    project_root = _get_project_root()
-    output_dir = os.path.join(project_root, args.output_dir)
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Create package.json if not exists
-    package_json_path = os.path.join(project_root, "package.json")
-    if not os.path.exists(package_json_path):
-        package_json = '{"name": "pdfka-project", "version": "1.0.0", "private": true}'
-        with open(package_json_path, "w", encoding="utf-8") as f:
-            f.write(package_json)
-        print(f"Created: {package_json_path}")
-
-    # Create Tailwind config
-    config_path = os.path.join(project_root, "tailwind.config.js")
-    if not os.path.exists(config_path):
-        with open(config_path, "w", encoding="utf-8") as f:
-            f.write(TAILWIND_CONFIG)
-        print(f"Created: {config_path}")
-    else:
-        print(f"Exists: {config_path}")
-
-    # Create input.css
-    input_css_path = os.path.join(output_dir, "input.css")
-    if not os.path.exists(input_css_path):
-        with open(input_css_path, "w", encoding="utf-8") as f:
-            f.write(INPUT_CSS)
-        print(f"Created: {input_css_path}")
-    else:
-        print(f"Exists: {input_css_path}")
-
-    # Create HTML template
-    template_path = os.path.join(output_dir, "page_template.html")
-    if not os.path.exists(template_path):
-        with open(template_path, "w", encoding="utf-8") as f:
-            f.write(get_tailwind_template())
-        print(f"Created: {template_path}")
-    else:
-        print(f"Exists: {template_path}")
-
-    print("\n" + "=" * 50)
-    print("Setup complete!")
-    print("=" * 50)
-    print("\nNext steps:")
-    print("1. Install Tailwind CSS:")
-    print("   npm install -D tailwindcss")
-    print("\n2. Build the CSS for PDF generation:")
-    print("   pdfka build-css")
-    print("\n3. Generate a preview (uses CDN, no build needed):")
-    print("   pdfka preview")
-    print("\n4. Generate PDF:")
-    print("   pdfka generate input.json --cp-name 'Company')")
 
 
 def get_tailwind_template() -> str:
@@ -568,8 +332,6 @@ def main() -> None:
         cmd_preview(args)
     elif args.command == "init":
         cmd_init(args)
-    elif args.command == "build-css":
-        cmd_build_css(args)
     elif args.command == "generate":
         cmd_generate(args)
     elif args.command == "serve":

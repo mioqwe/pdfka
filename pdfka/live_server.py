@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Set
 
 from starlette.applications import Starlette
-from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.routing import Route, WebSocketRoute
 from starlette.staticfiles import StaticFiles
 from starlette.websockets import WebSocket, WebSocketDisconnect
@@ -89,6 +89,27 @@ async def preview_endpoint(request):
         return HTMLResponse(f"<pre>Error: {e}</pre>", status_code=500)
 
 
+async def tailwind_config_endpoint(request):
+    config_js = """tailwind.config = {
+    theme: {
+        extend: {
+            fontFamily: {
+                sans: ['Inter', 'system-ui', 'sans-serif'],
+            },
+            fontSize: {
+                'print-xs': ['12px', { lineHeight: '1.4' }],
+                'print-sm': ['14px', { lineHeight: '1.5' }],
+                'print-base': ['16px', { lineHeight: '1.6' }],
+                'print-lg': ['20px', { lineHeight: '1.4' }],
+                'print-xl': ['24px', { lineHeight: '1.3' }],
+                'print-2xl': ['32px', { lineHeight: '1.2' }],
+            },
+        },
+    },
+};"""
+    return Response(config_js, media_type="application/javascript")
+
+
 async def data_endpoint(request):
     input_path = request.query_params.get("input")
     try:
@@ -108,13 +129,12 @@ async def css_endpoint(request):
 
 
 async def live_preview_page(request):
-    from starlette.staticfiles import StaticFiles
-
-    html_content = get_live_preview_html()
+    input_path = request.query_params.get("input")
+    html_content = get_live_preview_html(input_path)
     return HTMLResponse(html_content)
 
 
-def get_live_preview_html() -> str:
+def get_live_preview_html(input_path: Optional[str] = None) -> str:
     return """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -177,6 +197,11 @@ def get_live_preview_html() -> str:
             flex: 1;
             overflow: auto;
             padding: 16px;
+            transition: opacity 0.3s ease;
+        }
+        
+        .sidebar.collapsed .json-content {
+            display: none;
         }
         
         .json-content pre {
@@ -333,6 +358,7 @@ def get_live_preview_html() -> str:
         const sidebar = document.getElementById('sidebar');
         const toggleBtn = document.getElementById('toggleSidebar');
         const jsonPre = document.getElementById('jsonPre');
+        const jsonContent = document.getElementById('jsonContent');
         const sidebarTitle = document.getElementById('sidebarTitle');
         
         function connectWS() {
@@ -357,14 +383,14 @@ def get_live_preview_html() -> str:
             };
         }
         
+        const urlParams = new URLSearchParams(window.location.search);
+        const inputPath = urlParams.get('input') || '';
+        
         async function loadPreview() {
             try {
-                const [previewRes, cssRes] = await Promise.all([
-                    fetch('/preview'),
-                    fetch('/css')
-                ]);
+                const previewUrl = '/preview' + (inputPath ? '?input=' + encodeURIComponent(inputPath) : '');
+                const previewRes = await fetch(previewUrl);
                 const html = await previewRes.text();
-                const css = await cssRes.text();
                 
                 const parser = new DOMParser();
                 const doc = parser.parseFromString(html, 'text/html');
@@ -376,10 +402,13 @@ def get_live_preview_html() -> str:
                 pageDivs.forEach((pageDiv, index) => {
                     const frame = document.createElement('iframe');
                     frame.className = 'preview-frame';
-                    frame.sandbox = 'allow-same-origin';
+                    frame.sandbox = 'allow-same-origin allow-scripts';
+                    frame.scrolling = 'no';
                     
-                    const pageHtml = `<!doctype html><html><head><meta charset="UTF-8"><style>${css}</style></head><body>${pageDiv.outerHTML}</body></html>`;
+                    // Base64-encoded page template - avoids script close tag issue
+                    const PAGE_TEMPLATE_B64 = 'PCFkb2N0eXBlIGh0bWw+CjxodG1sPgo8aGVhZD4KICAgIDxtZXRhIGNoYXJzZXQ9IlVURi04Ij4KICAgIDxzY3JpcHQgc3JjPSJodHRwczovL2Nkbi50YWlsd2luZGNzcy5jb20iPjwvc2NyaXB0PgogICAgPHNjcmlwdCBzcmM9Ii9wcmV2aWV3L3RhaWx3aW5kLWNvbmZpZy5qcyI+PC9zY3JpcHQ+CiAgICA8c3R5bGU+CiAgICAgICAgQGZvbnQtZmFjZSB7CiAgICAgICAgICAgIGZvbnQtZmFtaWx5OiAiSW50ZXIiOwogICAgICAgICAgICBzcmM6IHVybCgiL2ZvbnRzL0ludGVyL3dlYi9JbnRlci1FeHRyYUxpZ2h0LndvZmYyIikgZm9ybWF0KCJ3b2ZmMiIpOwogICAgICAgICAgICBmb250LXdlaWdodDogMjAwOwogICAgICAgIH0KICAgICAgICBAZm9udC1mYWNlIHsKICAgICAgICAgICAgZm9udC1mYW1pbHk6ICJJbnRlciI7CiAgICAgICAgICAgIHNyYzogdXJsKCIvZm9udHMvSW50ZXIvd2ViL0ludGVyLVRoaW4ud29mZjIiKSBmb3JtYXQoIndvZmYyIik7CiAgICAgICAgICAgIGZvbnQtd2VpZ2h0OiAxMDA7CiAgICAgICAgfQogICAgICAgIEBmb250LWZhY2UgewogICAgICAgICAgICBmb250LWZhbWlseTogIkludGVyIjsKICAgICAgICAgICAgc3JjOiB1cmwoIi9mb250cy9JbnRlci93ZWIvSW50ZXItTGlnaHQud29mZjIiKSBmb3JtYXQoIndvZmYyIik7CiAgICAgICAgICAgIGZvbnQtd2VpZ2h0OiAzMDA7CiAgICAgICAgfQogICAgICAgIEBmb250LWZhY2UgewogICAgICAgICAgICBmb250LWZhbWlseTogIkludGVyIjsKICAgICAgICAgICAgc3JjOiB1cmwoIi9mb250cy9JbnRlci93ZWIvSW50ZXItUmVndWxhci53b2ZmMiIpIGZvcm1hdCgid29mZjIiKTsKICAgICAgICAgICAgZm9udC13ZWlnaHQ6IDQwMDsKICAgICAgICB9CiAgICAgICAgQGZvbnQtZmFjZSB7CiAgICAgICAgICAgIGZvbnQtZmFtaWx5OiAiSW50ZXIiOwogICAgICAgICAgICBzcmM6IHVybCgiL2ZvbnRzL0ludGVyL3dlYi9JbnRlci1NZWRpdW0ud29mZjIiKSBmb3JtYXQoIndvZmYyIik7CiAgICAgICAgICAgIGZvbnQtd2VpZ2h0OiA1MDA7CiAgICAgICAgfQogICAgICAgIEBmb250LWZhY2UgewogICAgICAgICAgICBmb250LWZhbWlseTogIkludGVyIjsKICAgICAgICAgICAgc3JjOiB1cmwoIi9mb250cy9JbnRlci93ZWIvSW50ZXItU2VtaUJvbGQud29mZjIiKSBmb3JtYXQoIndvZmYyIik7CiAgICAgICAgICAgIGZvbnQtd2VpZ2h0OiA2MDA7CiAgICAgICAgfQogICAgICAgIEBmb250LWZhY2UgewogICAgICAgICAgICBmb250LWZhbWlseTogIkludGVyIjsKICAgICAgICAgICAgc3JjOiB1cmwoIi9mb250cy9JbnRlci93ZWIvSW50ZXItQm9sZC53b2ZmMiIpIGZvcm1hdCgid29mZjIiKTsKICAgICAgICAgICAgZm9udC13ZWlnaHQ6IDcwMDsKICAgICAgICB9CiAgICAgICAgQHBhZ2UgewogICAgICAgICAgICBzaXplOiAyOTdtbSAyMTBtbTsKICAgICAgICAgICAgbWFyZ2luOiAwOwogICAgICAgIH0KICAgICAgICAqIHsgYm94LXNpemluZzogYm9yZGVyLWJveDsgfQogICAgICAgIGJvZHkgeyBtYXJnaW46IDA7IHBhZGRpbmc6IDA7IGZvbnQtZmFtaWx5OiAnSW50ZXInLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWY7IG92ZXJmbG93OiBoaWRkZW47IGhlaWdodDogMTAwdmg7IH0KICAgICAgICAucGRmLXBhZ2UgewogICAgICAgICAgICB3aWR0aDogMjk3bW07CiAgICAgICAgICAgIGhlaWdodDogMjEwbW07CiAgICAgICAgICAgIHBhZGRpbmc6IDNtbSA1bW07CiAgICAgICAgICAgIHBvc2l0aW9uOiByZWxhdGl2ZTsKICAgICAgICAgICAgb3ZlcmZsb3c6IGhpZGRlbjsKICAgICAgICAgICAgYmFja2dyb3VuZDogd2hpdGU7CiAgICAgICAgfQogICAgICAgIEBtZWRpYSBzY3JlZW4gewogICAgICAgICAgICBib2R5IHsgYmFja2dyb3VuZDogd2hpdGU7IH0KICAgICAgICAgICAgLnBkZi1wYWdlIHsgbWFyZ2luOiAwIGF1dG87IGJveC1zaGFkb3c6IDAgNHB4IDIwcHggcmdiYSgwLCAwLCAwLCAwLjEpOyB9CiAgICAgICAgfQogICAgPC9zdHlsZT4KPC9oZWFkPgo8Ym9keT57e1BBR0VfQ09OVEVOVH19CjwvYm9keT4KPC9odG1sPg==';
                     
+                    const pageHtml = atob(PAGE_TEMPLATE_B64).replace('{{PAGE_CONTENT}}', pageDiv.outerHTML);
                     frame.srcdoc = pageHtml;
                     pagesContainer.appendChild(frame);
                     pages.push(frame);
@@ -394,7 +423,8 @@ def get_live_preview_html() -> str:
         
         async function loadJSON() {
             try {
-                const response = await fetch('/data');
+                const dataUrl = '/data' + (inputPath ? '?input=' + encodeURIComponent(inputPath) : '');
+                const response = await fetch(dataUrl);
                 const data = await response.json();
                 jsonPre.textContent = JSON.stringify(data, null, 2);
             } catch (e) {
@@ -433,9 +463,11 @@ def get_live_preview_html() -> str:
             if (sidebar.classList.contains('collapsed')) {
                 toggleBtn.textContent = '☰';
                 sidebarTitle.classList.add('hidden');
+                jsonContent.style.display = 'none';
             } else {
                 toggleBtn.textContent = '✕';
                 sidebarTitle.classList.remove('hidden');
+                jsonContent.style.display = '';
             }
         });
         
@@ -462,6 +494,7 @@ routes = [
     Route("/", lambda request: RedirectResponse(url="/live_preview")),
     Route("/live_preview", live_preview_page),
     Route("/preview", preview_endpoint),
+    Route("/preview/tailwind-config.js", tailwind_config_endpoint),
     Route("/data", data_endpoint),
     Route("/css", css_endpoint),
     WebSocketRoute("/ws", websocket_endpoint),

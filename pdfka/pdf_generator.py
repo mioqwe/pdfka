@@ -3,7 +3,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from jinja2 import Environment, FileSystemLoader, Template
-from weasyprint import CSS, HTML
+from playwright.sync_api import sync_playwright
 
 from pdfka.config import DEFAULT_OVERFLOW_CONFIG, DEFAULT_PAGE_CONFIG
 from pdfka.template import TemplateContext, TemplateRenderer
@@ -19,15 +19,18 @@ def _get_project_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+def _get_fonts_dir() -> str:
+    """Get the fonts directory path."""
+    return os.path.join(_get_project_root(), "fonts")
+
+
 def _get_default_output_path(company_name: Optional[str]) -> str:
     """Generate default output path in project output directory."""
     project_root = _get_project_root()
     output_dir = os.path.join(project_root, "output")
 
-    # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
 
-    # Generate filename: offer_{company_name}.pdf
     safe_name = company_name.strip().replace(" ", "_") if company_name else "unknown"
     filename = f"offer_{safe_name}.pdf"
 
@@ -39,36 +42,21 @@ def _get_template_dir() -> str:
     return os.path.join(_get_project_root(), "templates")
 
 
-def _get_tailwind_css() -> Optional[str]:
-    """Load compiled Tailwind CSS if available."""
-    css_path = os.path.join(_get_template_dir(), "tailwind.css")
-    if os.path.exists(css_path):
-        with open(css_path, "r", encoding="utf-8") as f:
-            return f.read()
-    return None
-
-
 def _prepare_html_for_pdf(html: str) -> str:
     """
     Prepare HTML for PDF generation:
-    1. Remove Tailwind CDN script
-    2. Inject compiled CSS if available
+    1. Keep Tailwind CDN script (for full Tailwind support)
+    2. Remove tailwind.config script
     3. Remove browser-only styles
     """
-    # Remove Tailwind CDN script
-    html = re.sub(
-        r'<script src="https://cdn\.tailwindcss\.com"></script>',
-        "",
-        html,
-    )
 
-    # Remove the tailwind config script (handle nested braces)
+    # Keep Tailwind CDN for full Tailwind functionality
+    # Only remove the custom tailwind.config script
     def remove_tailwind_config(text):
         result = []
         i = 0
         while i < len(text):
             if text[i : i + 7] == "<script":
-                script_start = i
                 script_end = text.find("</script>", i)
                 if script_end != -1:
                     script_content = text[i:script_end]
@@ -104,26 +92,40 @@ def _prepare_html_for_pdf(html: str) -> str:
         flags=re.DOTALL,
     )
 
-    # Inject compiled CSS if available
-    tailwind_css = _get_tailwind_css()
-    if tailwind_css:
-        # Find </head> and insert CSS before it
-        css_block = f"<style>{tailwind_css}</style>"
-        html = html.replace("</head>", f"{css_block}</head>")
-
     return html
 
 
 def _prepare_html_for_preview(html: str) -> str:
     """
     Prepare HTML for live preview to match PDF rendering:
-    1. Remove Tailwind CDN script
-    2. Remove tailwind.config script
-    3. Remove style[type="text/tailwindcss"] (Tailwind directives)
-    4. Remove @media screen styles
-    5. Inject compiled CSS for accurate preview
+    1. Keep Tailwind CDN script
+    2. Remove tailwind.config script only (keep everything else for preview)
     """
-    html = _prepare_html_for_pdf(html)
+
+    # Only remove tailwind.config script - keep everything else for proper preview
+    def remove_tailwind_config(text):
+        result = []
+        i = 0
+        while i < len(text):
+            if text[i : i + 7] == "<script":
+                script_end = text.find("</script>", i)
+                if script_end != -1:
+                    script_content = text[i:script_end]
+                    if "tailwind.config" in script_content:
+                        i = script_end + len("</script>")
+                        continue
+                    else:
+                        result.append(text[i])
+                        i += 1
+                else:
+                    result.append(text[i])
+                    i += 1
+            else:
+                result.append(text[i])
+                i += 1
+        return "".join(result)
+
+    html = remove_tailwind_config(html)
     return html
 
 
@@ -370,6 +372,62 @@ class PDFGenerator:
         full_html = self._combine_pages(pages_html)
         return _prepare_html_for_preview(full_html)
 
+    def _prepare_html_for_playwright(self, html: str) -> str:
+        """Prepare HTML for Playwright PDF generation.
+
+        Keeps Tailwind CDN and essential styles, injects PDF print CSS for proper page handling.
+        """
+
+        # Remove tailwind.config script (keep CDN)
+        def remove_tailwind_config(text):
+            result = []
+            i = 0
+            while i < len(text):
+                if text[i : i + 7] == "<script":
+                    script_end = text.find("</script>", i)
+                    if script_end != -1:
+                        script_content = text[i:script_end]
+                        if "tailwind.config" in script_content:
+                            i = script_end + len("</script>")
+                            continue
+                        else:
+                            result.append(text[i])
+                            i += 1
+                    else:
+                        result.append(text[i])
+                        i += 1
+                else:
+                    result.append(text[i])
+                    i += 1
+            return "".join(result)
+
+        html = remove_tailwind_config(html)
+
+        # Keep <style type="text/tailwindcss"> block - it contains @page rules and .pdf-page styles
+        # We only remove browser-only styles
+        html = re.sub(
+            r"<style>\s*/\* Browser preview styles \*/.*?</style>",
+            "",
+            html,
+            flags=re.DOTALL,
+        )
+
+        # Inject PDF print CSS after Tailwind CDN for @page rules and page-break handling
+        pdf_print_css = self._get_pdf_print_css()
+        if pdf_print_css:
+            # Inject as <style> tag directly before </head> for reliable @page handling
+            html = html.replace("</head>", f"<style>{pdf_print_css}</style></head>")
+
+        return html
+
+    def _get_pdf_print_css(self) -> Optional[str]:
+        """Load PDF print CSS styles."""
+        css_path = os.path.join(_get_template_dir(), "pdf-print.css")
+        if os.path.exists(css_path):
+            with open(css_path, "r", encoding="utf-8") as f:
+                return f.read()
+        return None
+
     def generate_pdf(
         self,
         json_data: Dict[str, Any],
@@ -381,12 +439,26 @@ class PDFGenerator:
         rendered_pages = self.template_renderer.render_pages(json_data, context)
         html_content = self.generate_html(rendered_pages, context)
 
-        # Prepare HTML for PDF (inject compiled CSS, remove CDN)
-        html_content = _prepare_html_for_pdf(html_content)
+        html_content = self._prepare_html_for_playwright(html_content)
 
         if output_path is None:
             output_path = _get_default_output_path(None)
 
-        HTML(string=html_content).write_pdf(output_path)
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            page = browser.new_page()
+
+            page.set_content(html_content, wait_until="networkidle")
+            page.wait_for_timeout(2000)  # Wait for Tailwind CDN to fully process
+
+            page.pdf(
+                path=output_path,
+                width="297mm",
+                height="210mm",
+                print_background=True,
+                margin={"top": "0", "right": "0", "bottom": "0", "left": "0"},
+            )
+
+            browser.close()
 
         return output_path, os.path.basename(output_path)

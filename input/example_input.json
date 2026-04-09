@@ -1,5 +1,5 @@
 {
-  "header": "Vidgyk × {{ cp_name if cp_name else 'Медичний центр' }}",
+  "header": "{{ cp_name if cp_name else 'Dobrobut' }}",
   "footer": "<p>info@vidgyk.com | www.vidgyk.com</p>",
   "1": {
     "h1": "Комерційна пропозиція",

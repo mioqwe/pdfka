@@ -1,0 +1,42 @@
+/* PDF Print Styles - Injected after Tailwind CDN */
+
+/* Page dimensions */
+@page {
+  size: 297mm 210mm;
+  margin: 0;
+}
+
+/* Reset for PDF */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: "Inter", system-ui, sans-serif;
+}
+
+/* PDF page container */
+.pdf-page {
+  width: 297mm;
+  height: 210mm;
+  padding: 3mm 5mm;
+  position: relative;
+  overflow: hidden;
+  background: white;
+  page-break-after: always;
+}
+
+.pdf-page:last-child {
+  page-break-after: avoid;
+}
+
+/* Page break utilities */
+.page-break {
+  page-break-after: always;
+}
+
+.page-break-avoid {
+  page-break-after: avoid;
+}

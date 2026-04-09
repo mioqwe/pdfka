@@ -128,33 +128,35 @@
     <div class="pdf-page">
       <!-- Global Header (Vidgyk x Brand Name) -->
       <div class="pb-4 mb-8">
-        <h1 class="text-black">
+        <h2 class="text-black">
           <span class="text-xl font-bold" style="font-family: Georgia, serif; font-weight: 100;">Vidgyk</span>
           <span class="font-extralight">x</span>
           <span class="text-xl font-bold">{{ global_header }}</span>
-        </h1>
+        </h2>
         <h3 class="text-gray-500 font-extralight">We make reviews work</h3>
       </div>
 
-      <!-- Page H1 -->
-      {% if h1 %}
-      <h2 class="mb-4 font-semibold text-black text-print-xl">{{ h1 }}</h2>
-      {% endif %}
+      <div class="mx-2">
+        <!-- Page H1 -->
+        {% if h1 %}
+        <h1 class="mb-4 text-2xl font-semibold text-black">{{ h1 }}</h1>
+        {% endif %}
 
-      <!-- Optional Image -->
-      {% if image %}
-      <div class="mb-6">
-        <img
-          src="{{ image }}"
-          alt="Page image"
-          class="object-contain max-h-32"
-        />
-      </div>
-      {% endif %}
+        <!-- Optional Image -->
+        {% if image %}
+        <div class="mb-6">
+          <img
+            src="{{ image }}"
+            alt="Page image"
+            class="object-contain max-h-32"
+          />
+        </div>
+        {% endif %}
 
-      <!-- Content -->
-      <div class="space-y-4 font-thin text-black text-print-base">
-        {{ content }}
+        <!-- Content -->
+        <div class="space-y-4 font-thin text-black text-print-base">
+          {{ content }}
+        </div>
       </div>
 
       <!-- Warning -->
